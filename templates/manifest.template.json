@@ -1,0 +1,46 @@
+{
+  "//": "offline-bundle manifest. One per skill. Fill in, then: python pack.py add <skill-dir> --manifest <this-file>",
+  "skill_name": "my-skill",
+  "skill_source": {
+    "//": "type=local copies a local dir; type=git clones a repo",
+    "type": "local",
+    "path": "C:/absolute/path/to/my-skill"
+  },
+  "target": {
+    "//": "Target intranet environment. pack.py cross-downloads for this.",
+    "python": "3.12",
+    "os": "win",
+    "arch": "amd64",
+    "node": "20"
+  },
+  "deps": {
+    "pip": [
+      { "name": "package-name" },
+      { "name": "pinned-version-package", "version": "==1.2.3" },
+      { "name": "ranged-version-package", "version": ">=1.0" }
+    ],
+    "npm": [
+      { "name": "package-name" },
+      { "name": "scoped-or-versioned", "version": "^9" }
+    ],
+    "playwright": {
+      "//": "Only if the skill uses playwright. Browsers go to pw-browser/ separately.",
+      "browsers": ["chromium"],
+      "version": "1.48"
+    },
+    "tools": [
+      {
+        "name": "auto-downloadable-exe",
+        "kind": "auto",
+        "version": "3.5",
+        "url_template": "https://example.com/{version}/tool-{version}-windows-x86_64.zip",
+        "extract_root": "tool-{version}"
+      },
+      {
+        "name": "manual-exe",
+        "kind": "manual",
+        "note": "Download X msi manually, place in bundle/tools/manual/, install on intranet"
+      }
+    ]
+  }
+}
