@@ -54,6 +54,46 @@ Otherwise `auto`, with `url_template` + `version` + `extract_root`.
    - Are the manual tools acceptable as manual?
 4. On confirmation, run `python pack.py add <skill-dir> --manifest <the-manifest>`.
 
+---
+
+## Analyzing an MCP server (pack.py mcp)
+
+MCP server 走独立的 manifest（`templates/mcp.template.json`）和 `pack.py mcp` 子命令。
+分析一个新 MCP server 时按此分类：
+
+**Step M1: 判 transport——服务在内网跑着吗？**
+
+- **目标服务自带 MCP**（如 NocoDB ≥0.265.0 内置）或内网已部署 HTTP MCP 服务
+  → `transport: "http"`。**零文件打包**，只登记 url + headers。
+- **独立 npm 包、stdio 启动**（`npx -y xxx` 形态）→ `transport: "stdio-npm"`，
+  pack.py 会整树下载到 `bundle/mcp/<name>/`（独立子树，非共享池——ESM 不走 NODE_PATH，
+  见 gotchas E1）。
+- Python 版 MCP server（uvx/pip 形态）目前**未支持**（可先 `pip download` 进 wheelhouse
+  手动处理，后续再扩展 stdio-pip transport）。
+
+**Step M2: 查包的可用性（联网机可查）**
+
+- npm 上有正式包？`registry.npmjs.org/<name>/latest` 看 `bin`（入口）、`dependencies`
+  （越少越好打包）、`engines.node`（对照内网 node 版本）、`type`（module=ESM）。
+- `bin` 有多个入口（如 `nocodb-mcp` + `nocodb-mcp-http`）时，用 server 级 `"bin"` 字段选。
+
+**Step M3: 区分"打包机可知"与"内网才知"的值**
+
+- 打包机可知：npm 包名、公有 url、非敏感默认值 → 直接写进 manifest。
+- **内网才知：主机地址、端口、token、tokenId → 一律写 `ask:VAR_NAME` 占位符**
+  （可嵌在 url 子串里），安装时 `_merge_mcp.py` 提示填入（gotchas E3/E4）。
+  判断标准：这个值在内网 GUI 里创建/取决于内网拓扑 → ask:。
+
+**Step M4: 版本兼容性问清用户**
+
+- server 对**后端服务版本**的要求（如 nocodb-mcp 要 NocoDB ≥2026.04 的 v3 API）；
+- engines.node 对照内网 Node 大版本。
+
+**Step M5: 产出 MCP manifest 并确认**
+
+复制 `templates/mcp.template.json`，按上面分类填 servers；向用户展示并确认 ask: 清单和
+版本要求后跑 `python pack.py mcp --manifest <file>`。
+
 ## Anti-patterns
 
 - **Don't** run a regex over imports and dump them all into pip. Classify by hand — stdlib modules and example-only imports need judgment.
@@ -64,3 +104,6 @@ Otherwise `auto`, with `url_template` + `version` + `extract_root`.
   版本不符打包出的 bundle 内网一个 C 扩展包都装不上（numpy/matplotlib/lxml 全废）。
 - **Don't** manually expand npm transitive deps into `deps.npm`. 只列顶层包名，传递依赖
   pack.py 用 `npm install` 整树解析。手动列既易漏又会让 install 逻辑混乱。
+- **Don't** write `npx -y <pkg>` into any generated MCP config——离线内网没有 registry，
+  npx 会当场联网失败。stdio 一律 `command: "node"` + 绝对路径入口（pack.py 已如此渲染）。
+- **Don't** bake 内网才有的值（token、内网主机地址）进 manifest——用 `ask:VAR` 占位符。

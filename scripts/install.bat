@@ -3,10 +3,16 @@ setlocal enabledelayedexpansion
 REM ============================================================
 REM install.bat - intranet installer for offline-bundle
 REM Reads manifest-index.json from bundle, self-checks, installs.
+REM Also merges MCP servers (mcp-servers.json) into zcode config
+REM via _merge_mcp.py - prompts for ask: secrets there.
 REM Usage: install.bat [--bundle <dir>] [--dry-run] [--skill <name>]
 REM ============================================================
 
-set "BUNDLE=%~dp0"
+REM snapshot %~dp0 BEFORE the arg-parse loop: `shift` moves %1.. into %0,
+REM so any %~dp0 read after parsing resolves against CWD instead of the
+REM script dir (see gotchas A6). Every later use must go through %HERE%.
+set "HERE=%~dp0"
+set "BUNDLE=%HERE%"
 set "DRYRUN=0"
 set "WANTSKILL="
 
@@ -54,7 +60,7 @@ echo.
 
 REM --- Step 1: self-check (always; --dry-run exits after) ---
 set "CHECKFAIL=0"
-python "%~dp0_check_install.py" "%BUNDLE%" "%WANTSKILL%"
+python "%HERE%_check_install.py" "%BUNDLE%" "%WANTSKILL%"
 if errorlevel 1 set "CHECKFAIL=1"
 
 echo.
@@ -157,7 +163,16 @@ for /d %%D in ("%BUNDLE%\skills\*") do (
 )
 echo.
 
-echo [6] tools
+echo [6] MCP servers (zcode config merge)
+if exist "%BUNDLE%\mcp-servers.json" (
+    python "%HERE%_merge_mcp.py" "%BUNDLE%"
+    if errorlevel 1 (echo   X MCP install failed ^& exit /b 1)
+) else (
+    echo   no MCP servers in this bundle
+)
+echo.
+
+echo [7] tools
 if exist "%BUNDLE%\tools\auto\*" (
     echo   auto tools at %BUNDLE%\tools\auto:
     for /d %%D in ("%BUNDLE%\tools\auto\*") do echo     %%~nxD ^(add to PATH: setx PATH "%%PATH%%;%%D"^)
@@ -168,15 +183,15 @@ if exist "%BUNDLE%\tools\manual\*.README" (
 )
 echo.
 
-echo [7] self-test (real imports)
+echo [8] self-test (real imports)
 set "STFAIL=0"
-python "%~dp0_check_install.py" "%BUNDLE%" "%WANTSKILL%" -test
+python "%HERE%_check_install.py" "%BUNDLE%" "%WANTSKILL%" -test
 if errorlevel 1 set "STFAIL=1"
 echo.
 
 echo ============================================
 if "!STFAIL!"=="0" (
-    echo   install complete. Restart zcode to load new skills.
+    echo   install complete. Restart zcode to load new skills and MCP servers.
 ) else (
     echo   install finished but self-test reported issues - see above.
 )

@@ -9,9 +9,17 @@ Prints a report. Exit 0 = ok, 1 = fatal issues found.
 """
 import json, os, sys, subprocess, zipfile, csv, io
 
+# symbol output must not crash under GBK pipes/consoles (cp936 default)
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
+
 bundle = sys.argv[1].rstrip("\\/")
 want = sys.argv[2] if len(sys.argv) > 2 and sys.argv[2] and not sys.argv[2].startswith("-") else None
-test_mode = "-test" in sys.argv[3:]
+# NB: scan argv[2:], not argv[3:] — with no skill name given, "-test" sits at argv[2]
+test_mode = "-test" in sys.argv[2:]
 index_path = os.path.join(bundle, "manifest-index.json")
 
 def c(code, s): return f"\033[{code}m{s}\033[0m"
@@ -170,6 +178,57 @@ for skill in index.get("skills", []):
         for f in os.listdir(tools_manual):
             if f.endswith(".README"):
                 warn(f"tool (manual) {f[:-7]}: not yet provided (non-fatal)")
+
+# --- MCP servers (bundle-level; written by pack.py mcp) ---
+mcp_json = os.path.join(bundle, "mcp-servers.json")
+if os.path.isfile(mcp_json):
+    try:
+        with open(mcp_json, encoding="utf-8") as f:
+            mcp_doc = json.load(f)
+    except json.JSONDecodeError as e:
+        fail(f"mcp-servers.json is not valid JSON: {e}"); fatal = True
+        mcp_doc = {}
+    for name, srv in mcp_doc.get("servers", {}).items():
+        print(f"  -- mcp:{name} --")
+        cfg = srv.get("config", {})
+        transport = srv.get("transport")
+        if transport == "http":
+            if cfg.get("url"):
+                ok(f"http url: {cfg['url']}")
+            else:
+                fail(f"mcp:{name} (http) has no url"); fatal = True
+            # ask: placeholders are expected pre-install; _merge_mcp.py fills them
+            for k, v in (cfg.get("headers") or {}).items():
+                if isinstance(v, str) and v.startswith("ask:"):
+                    warn(f"header {k} = {v} (filled at install time)")
+        elif transport == "stdio-npm":
+            entry = srv.get("entry", "")
+            entry_path = os.path.join(bundle, "mcp", name, *entry.split("/"))
+            if entry and os.path.isfile(entry_path):
+                ok(f"entry present: mcp/{name}/{entry}")
+                if test_mode:
+                    r = subprocess.run(["node", "--check", entry_path],
+                                       capture_output=True, text=True)
+                    if r.returncode == 0:
+                        ok(f"node --check ok ({srv.get('package', '?')})")
+                    else:
+                        msg = (r.stderr or r.stdout).strip().splitlines()
+                        warn(f"node --check failed: {msg[-1] if msg else '?'}")
+            else:
+                fail(f"mcp:{name} entry missing in bundle: mcp/{name}/{entry}")
+                fatal = True
+            nm = os.path.join(bundle, "mcp", name, "node_modules")
+            if os.path.isdir(nm):
+                ok("node_modules tree present")
+            else:
+                fail(f"mcp:{name} has no node_modules tree"); fatal = True
+            for k, v in (cfg.get("env") or {}).items():
+                if isinstance(v, str) and v.startswith("ask:"):
+                    warn(f"env {k} = {v} (filled at install time)")
+        else:
+            fail(f"mcp:{name} unknown transport {transport!r}"); fatal = True
+        if srv.get("note"):
+            print(f"     note: {srv['note']}")
 
 print()
 sys.exit(1 if fatal else 0)
