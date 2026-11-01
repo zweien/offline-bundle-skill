@@ -158,6 +158,11 @@ def test_mcp_http_needs_url():
     assert any("url" in e for e in validate_mcp_manifest(m))
 
 
+def test_mcp_url_must_be_http_scheme():
+    m = _mcp_base(); m["servers"][0]["url"] = "ftp://10.0.0.1/mcp"
+    assert any("http://" in e for e in validate_mcp_manifest(m))
+
+
 def test_mcp_headers_values_must_be_strings():
     m = _mcp_base(); m["servers"][0]["headers"] = {"x-api-key": 123}
     assert any("headers" in e and "string" in e for e in validate_mcp_manifest(m))

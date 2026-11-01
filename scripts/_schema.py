@@ -158,8 +158,13 @@ def validate_mcp_manifest(m):
             continue
 
         if transport == "http":
-            if not srv.get("url"):
+            url = srv.get("url")
+            if not url:
                 errors.append(f"{where} (http) requires a 'url'")
+            elif not isinstance(url, str) or not (
+                url.startswith("http://") or url.startswith("https://")
+            ):
+                errors.append(f"{where}.url must start with http:// or https://")
             headers = srv.get("headers")
             if headers is not None:
                 if not isinstance(headers, dict):

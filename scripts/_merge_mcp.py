@@ -161,8 +161,8 @@ def main():
         warn("mcp-servers.json declares no servers")
         sys.exit(0)
 
-    config_path = args.config or default_config_path()
-    mcp_root = args.mcp_root or default_mcp_root()
+    config_path = os.path.abspath(args.config or default_config_path())
+    mcp_root = os.path.abspath(args.mcp_root or default_mcp_root())
 
     print("=" * 46)
     print("  offline-bundle MCP install")
@@ -222,7 +222,14 @@ def main():
             if not install_tree(src, values_local["__INSTALL_DIR__"], args.dry_run):
                 fatal = True
                 continue
-        merged[name] = render(frag, values_local)
+        if args.dry_run:
+            # never echo resolved secrets to the terminal: mask values that
+            # came from ask: placeholders (the install path itself is not secret)
+            masked = {k: f"<{k} provided>" for k in values}
+            masked["__INSTALL_DIR__"] = values_local["__INSTALL_DIR__"]
+            merged[name] = render(frag, masked)
+        else:
+            merged[name] = render(frag, values_local)
         if srv.get("note"):
             print(f"     note: {srv['note']}")
     print()
@@ -278,8 +285,16 @@ def main():
         ok(f"mcp.servers.{name} merged")
 
     tmp = config_path + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(cfg, f, indent=2, ensure_ascii=False)
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(cfg, f, indent=2, ensure_ascii=False)
+    except Exception as e:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        fail(f"writing config failed ({e}); original left unchanged")
+        sys.exit(1)
     os.replace(tmp, config_path)
     ok(f"config written: {config_path}")
 

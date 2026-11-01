@@ -340,22 +340,30 @@ def pack_mcp_stdio(srv, bundle):
     ver = pkg.get("version")
     spec = f"{pkg_name}@{ver}" if ver else pkg_name
     srv_dir = os.path.join(bundle, "mcp", name)
+    # build into <name>.new and swap in only on success — a failed npm install
+    # must not leave mcp-servers.json pointing at a half-deleted tree
+    staging = srv_dir + ".new"
+    if os.path.isdir(staging):
+        shutil.rmtree(staging)
+    os.makedirs(staging, exist_ok=True)
     if os.path.isdir(srv_dir):
         info(f"mcp[{name}]: replacing existing tree {srv_dir}")
-        shutil.rmtree(srv_dir)
-    os.makedirs(srv_dir, exist_ok=True)
-    pj = os.path.join(srv_dir, "package.json")
+    pj = os.path.join(staging, "package.json")
     with open(pj, "w", encoding="utf-8") as f:
         f.write(json.dumps({"name": f"offline-bundle-mcp-{name}",
                             "version": "1.0.0", "private": True}))
     info(f"mcp[{name}]: npm install {spec} (full dep tree)...")
     result = subprocess.run(["npm", "install", "--no-audit", "--no-fund",
                              "--omit=dev", spec],
-                            cwd=srv_dir, capture_output=True, text=True, shell=True)
+                            cwd=staging, capture_output=True, text=True, shell=True)
     if result.returncode != 0:
         fail(f"npm install failed for {spec}:")
         print(result.stderr)
+        shutil.rmtree(staging, ignore_errors=True)
         sys.exit(1)
+    if os.path.isdir(srv_dir):
+        shutil.rmtree(srv_dir)
+    os.rename(staging, srv_dir)
     nm = os.path.join(srv_dir, "node_modules")
     pkg_dir = os.path.join(nm, *pkg_name.split("/"))
     pkg_pj = os.path.join(pkg_dir, "package.json")
