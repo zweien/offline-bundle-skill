@@ -89,7 +89,7 @@ for /f "delims=" %%P in ('python -c "import os,glob;[print(os.path.basename(w).s
 if defined PIPLIST (
     echo   installing:!PIPLIST!
     pip install --no-index --find-links "%PIPWH%"!PIPLIST!
-    if errorlevel 1 (echo   X pip install failed ^& exit /b 1)
+    if errorlevel 1 (echo   X pip install failed & exit /b 1)
     set "PIPDID=1"
     echo   pip deps installed
 ) else (
@@ -109,7 +109,7 @@ if exist "%NPM_SRC%" (
     echo   target: %NPM_DST%
     if not exist "%NPM_DST%" mkdir "%NPM_DST%"
     xcopy /e /y /i /q "%NPM_SRC%" "%NPM_DST%" >nul
-    if errorlevel 1 (echo   X copy failed ^& exit /b 1)
+    if errorlevel 1 (echo   X copy failed & exit /b 1)
     setx NODE_PATH "%NPM_DST%" >nul
     set "NODE_PATH=%NPM_DST%"
     echo   npm deps copied to %NPM_DST%; NODE_PATH set
@@ -119,7 +119,7 @@ if exist "%NPM_SRC%" (
     echo     This bundle was packed by an OLD pack.py. Re-pack on the online machine
     echo     to get the full dependency tree, or run on an internet-connected machine:
     call npm install -g "%NPMWH%\*.tgz"
-    if errorlevel 1 (echo   X npm install failed ^& exit /b 1)
+    if errorlevel 1 (echo   X npm install failed & exit /b 1)
 ) else (
     echo   no npm packages to install
 )
@@ -158,7 +158,7 @@ for /d %%D in ("%BUNDLE%\skills\*") do (
     )
     echo   installing skill !SKNAME!
     xcopy /e /i /q /y "%%D" "!DEST!" >nul
-    if errorlevel 1 (echo   X failed to install !SKNAME! ^& exit /b 1)
+    if errorlevel 1 (echo   X failed to install !SKNAME! & exit /b 1)
     echo   skill !SKNAME! -^> !DEST!
 )
 echo.
@@ -166,7 +166,7 @@ echo.
 echo [6] MCP servers (zcode config merge)
 if exist "%BUNDLE%\mcp-servers.json" (
     python "%HERE%_merge_mcp.py" "%BUNDLE%"
-    if errorlevel 1 (echo   X MCP install failed ^& exit /b 1)
+    if errorlevel 1 (echo   X MCP install failed & exit /b 1)
 ) else (
     echo   no MCP servers in this bundle
 )

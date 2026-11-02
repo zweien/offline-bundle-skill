@@ -106,7 +106,8 @@ MCP 支持（`pack.py mcp`，开发机验证）：
 - `install.bat --dry-run` 含 MCP 自检；`-test` 模式对入口跑 `node --check`
 - 顺手修复的**原版潜伏 bug**：① `shift` 污染 `%~dp0`（gotchas A6，从非脚本目录带参调用
   必炸）；② 无 skill 名时 `-test` 落 argv[2] 不被识别；③ GBK 管道/控制台下符号输出崩溃；
-  ④ Windows `getpass` 在非 tty stdin 下挂死
+  ④ Windows `getpass` 在非 tty stdin 下挂死；⑤ `(echo ... ^& exit /b 1)` 的 exit 从不执行
+  （gotchas A7，错误路径静默放行——Codex PR 评审发现）
 
 **内网部署要点（target 必须匹配内网 Python 版本）**：
 - bundle 的 pip wheel 按 target.python 的 cp 标签下载（cp312 ≠ cp313，装不上就换版本重打）

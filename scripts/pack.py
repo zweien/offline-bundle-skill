@@ -361,14 +361,15 @@ def pack_mcp_stdio(srv, bundle):
         print(result.stderr)
         shutil.rmtree(staging, ignore_errors=True)
         sys.exit(1)
-    if os.path.isdir(srv_dir):
-        shutil.rmtree(srv_dir)
-    os.rename(staging, srv_dir)
-    nm = os.path.join(srv_dir, "node_modules")
+    # validate everything on the STAGING tree; only a fully validated tree may
+    # replace the existing one (a bad bin selector after a successful install
+    # must not leave mcp-servers.json pointing at a broken replacement)
+    nm = os.path.join(staging, "node_modules")
     pkg_dir = os.path.join(nm, *pkg_name.split("/"))
     pkg_pj = os.path.join(pkg_dir, "package.json")
     if not os.path.isfile(pkg_pj):
         fail(f"mcp[{name}]: installed package manifest not found: {pkg_pj}")
+        shutil.rmtree(staging, ignore_errors=True)
         sys.exit(1)
     with open(pkg_pj, encoding="utf-8") as f:
         installed = json.load(f)
@@ -376,12 +377,14 @@ def pack_mcp_stdio(srv, bundle):
     if not entry:
         hint = f" (wanted {srv['bin']!r})" if srv.get("bin") else ""
         fail(f"mcp[{name}]: no usable bin entry in {pkg_name}{hint}")
+        shutil.rmtree(staging, ignore_errors=True)
         sys.exit(1)
     entry = entry.replace("\\", "/")
     while entry.startswith("./"):
         entry = entry[2:]
     if not os.path.isfile(os.path.join(pkg_dir, *entry.split("/"))):
         fail(f"mcp[{name}]: bin entry does not exist on disk: {entry}")
+        shutil.rmtree(staging, ignore_errors=True)
         sys.exit(1)
     # count top-level packages (incl. @scope/*), same convention as download_npm
     top = [d for d in os.listdir(nm)
@@ -390,6 +393,10 @@ def pack_mcp_stdio(srv, bundle):
     for d in top:
         if d.startswith("@"):
             count += len(os.listdir(os.path.join(nm, d))) - 1
+    # validated — now swap the staged tree in
+    if os.path.isdir(srv_dir):
+        shutil.rmtree(srv_dir)
+    os.rename(staging, srv_dir)
     ok(f"mcp[{name}]: {spec} installed, entry node_modules/{pkg_name}/{entry}, "
        f"{count} package(s)")
     return {"package": spec, "entry": f"node_modules/{pkg_name}/{entry}",
