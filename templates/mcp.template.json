@@ -1,0 +1,27 @@
+{
+  "//": "offline-bundle MCP manifest. Fill in, then: python scripts/pack.py mcp --manifest <this-file> [--bundle <dir>]",
+  "//transports": "http = server already running on the intranet (e.g. NocoDB built-in MCP) - only a zcode config fragment is generated, nothing is downloaded; stdio-npm = standalone npm MCP server - packed as a self-contained node_modules tree under bundle/mcp/<name>/",
+  "//secrets": "any value may embed ask:VAR_NAME placeholders (also inside urls); they are prompted at intranet install time by _merge_mcp.py and never stored in the bundle",
+  "//bin": "stdio-npm only: which entry of the package's bin map to expose, when it has several (e.g. nocodb-mcp vs nocodb-mcp-http). Defaults to the bin key matching the package name",
+  "servers": [
+    {
+      "//": "NocoDB built-in MCP (needs NocoDB >= 0.265.0; account-wide tokens need 2026.09.1+). Create the MCP token in the NocoDB GUI; the token id goes in the url path",
+      "name": "nocodb",
+      "transport": "http",
+      "url": "http://<intranet-nocodb-host>:8080/api/v2/mcp/<mcpTokenId>",
+      "headers": { "x-api-key": "ask:NOCODB_MCP_TOKEN" },
+      "note": "token: NocoDB GUI -> Base/Account settings -> MCP"
+    },
+    {
+      "//": "community stdio server (zoyak-tech/nocodb-mcp, NocoDB v3 API >= 2026.04; Community self-hosted gets ~40-50 of 92 tools - v3 meta API is partly Enterprise-gated)",
+      "name": "nocodb-mcp",
+      "transport": "stdio-npm",
+      "package": { "name": "nocodb-mcp" },
+      "env": {
+        "NOCODB_BASE_URL": "ask:NOCODB_BASE_URL",
+        "NOCODB_API_TOKEN": "ask:NOCODB_API_TOKEN"
+      },
+      "note": "API token: NocoDB GUI -> Account -> Tokens"
+    }
+  ]
+}

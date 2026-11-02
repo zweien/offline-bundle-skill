@@ -110,6 +110,43 @@ pip 报 `Invalid wheel filename (wrong number of parts): '*'`；
 **未来注意**：batch 里重命名/移动目录，**用 `move /Y` 而非 `ren`**。`move` 接受完整
 路径、能覆盖、错误信息明确。`ren` 的"纯名 + 不能存在"约束在重试/覆盖场景下是地雷。
 
+### A6. `shift` 会把参数移进 `%0`，解析循环之后再读 `%~dp0` 得到的是错的
+
+**现象**：install.bat 里 `python "%~dp0_check_install.py"` 报
+`can't open file 'C:\...\mcp-e2e\_check_install.py'`——`%~dp0` 解析成了**调用者所在目录**
+而非脚本所在目录。且只在"从别的目录、以相对路径调用 + 带 `--bundle`/`--skill` 参数"时
+出现；在脚本目录里直接跑一切正常（所以内网实跑当时没暴露）。
+
+**根因**：cmd 的 `shift` **会把 %1 移入 %0**（实测：`call x.bat aaa bbb` 后第一次 shift
+→ `%0=aaa`，第二次 → `%0=bbb`；不像文档暗示的 %0 不变）。install.bat 的 `:parse` 参数
+循环 shift 消耗完参数后，`%0` 已变成某个**无目录部分的字符串**（如 `bundle-stdio` 或空），
+此时再展开 `%~dp0` 就按 CWD 解析 → 得到调用者目录。
+
+**当前代码处理**：`setlocal` 后、进入 `:parse` 循环**之前**立刻快照
+`set "HERE=%~dp0"`，之后所有对脚本目录的引用一律用 `%HERE%`（_check_install.py、
+_merge_mcp.py 的调用路径）。
+
+**未来注意**：任何带参数解析循环（shift）的 batch，**必须在第一次 shift 前快照
+`%~dp0`/%~f0**；循环后出现的 `%~dp0` 一律视为不可信。
+
+### A7. `echo ... ^& exit /b 1` 里的 exit 从不执行（^& 把它变成了纯文本）
+
+**现象**：install.bat 各错误分支写的是
+`if errorlevel 1 (echo   X ... ^& exit /b 1)`——失败时只打印了
+`X ... & exit /b 1` 这串**文字**，脚本**继续往下跑**，最后还能报
+"install complete"。错误路径从未真正中止。
+
+**根因**：`^&` 是转义后的字面 `&`，归 echo 当文本输出；只有**未转义**的 `&`
+才是命令分隔符。当初是误套了 A3 的"echo 里 && 要转义"结论——A3 说的是想把
+`&&` **打印出来**的场景，不是想在 echo 后接命令。
+
+**当前代码处理**：所有 `(echo ... & exit /b 1)` 改为**未转义** `&`。
+注意区分：`for /f ('python --version 2^>^&1')` 里的 `^>^&` 是**正确**的
+（让重定向属于内层命令），不要顺手"修"它。
+
+**未来注意**：`echo` 与另一条命令同行时用未转义 `&`；想把 `&`/`&&` 作为
+**文本**显示才转义。review 常见坑：见一处 `^&` 就全改，会弄坏 for /f 的重定向。
+
 ---
 
 ## 类别 B：pip / 交叉下载陷阱
@@ -232,3 +269,76 @@ bundle 根。
 **未来注意**：bundle 必须**自包含**——install.bat 跑起来依赖的**所有**文件（脚本、配置、
 辅助 py）都要在 `finalize_bundle` 里显式拷进去。新增任何 install.bat 的依赖文件，同步更新
 `finalize_bundle` 的拷贝列表。
+
+---
+
+## 类别 E：MCP server 离线部署陷阱
+
+### E1. ESM 包的 import 不走 NODE_PATH，stdio MCP server 必须用独立子树
+
+**现象**：如果把 stdio MCP server（如 `nocodb-mcp`，`"type": "module"` 的 ESM 包）装进
+共享 `wheelhouse/npm/node_modules/`，内网拷到 `%ProgramData%\node-global-libs` 后，
+配置里 `node <该包入口>` 启动报 `ERR_MODULE_NOT_FOUND: Cannot find package
+'@modelcontextprotocol/sdk'`，虽然 NODE_PATH 里明明有它。
+
+**根因**：skill 脚本的 `require()` 是 CJS 解析，找不到本地 node_modules 时会退回查
+NODE_PATH——所以共享池 + NODE_PATH 对 CJS 有效。但 **ESM 的 bare import
+（`import ... from '@modelcontextprotocol/sdk'`）完全忽略 NODE_PATH**，只做标准目录向上
+查找（入口所在目录逐级找 `node_modules/`）。MCP server 包大量是 ESM，共享池方案对它们
+天然失效。
+
+**当前代码处理**：`pack.py mcp`（`pack_mcp_stdio`）给每个 stdio server 建**独立子树**
+`bundle/mcp/<name>/package.json + node_modules/`（含整棵传递依赖树）。zcode 配置按
+绝对路径引用入口 `<安装根>/<name>/node_modules/<pkg>/<bin>`，入口向上一步就是本 server
+的 `node_modules/`，CJS/ESM 都能标准解析，与 NODE_PATH 彻底无关。
+
+**未来注意**：任何"按绝对路径启动入口脚本"的 node 程序（MCP server、工具脚本）都别依赖
+NODE_PATH——只有 CJS require 认它。要么独立子树，要么把入口放进能向上找到依赖的目录。
+
+### E2. zcode MCP 配置 schema 严格且不展开 `${...}` 模板
+
+**现象**：手工往 `~/.zcode/cli/config.json` 的 `mcp.servers` 里塞了带自定义键（如
+`description`）或 `command: ["npx", "-y", "x"]`（数组）的条目，server 在
+Settings → MCP 里**整个不出现**或被丢弃。
+
+**根因**：zcode 配置文件的 MCP schema 是**严格校验**：未知键→该 server 被丢弃；
+`type` 与字段不匹配（`command`/`url` 二选一）、`command` 必须是字符串（args 才是数组）
+都会静默失败。且配置文件里的 server **不展开 `${...}` 模板变量**（那是 plugin 专属能力），
+模板会原样传给进程。
+
+**当前代码处理**：`build_mcp_record` 渲染片段时**只用规范字段**
+（`type/url/headers/command/args/env/timeoutMs`），stdio 的 `args` 用
+`{{INSTALL_DIR}}` 自有占位符，由 `_merge_mcp.py` 在内网展开成绝对路径后再写入
+config——不依赖 zcode 展开任何东西。
+
+**未来注意**：改片段渲染逻辑时，**别引入任何非规范键**；需要变量替换就用自己的占位符
+在写入前展开。
+
+### E3. 内网才有的 secret（token）不能在打包时写死
+
+**现象**：NocoDB 的 MCP token 是在内网 NocoDB GUI 里创建的，联网打包时根本不存在；
+即使知道，把 token 写进 bundle 拷来拷去也会泄漏。
+
+**根因**：离线打包发生在联网机、安装发生在内网机，两台机器的"已知信息"不同——认证类
+值（MCP token、API token）只能在内网安装时产生/输入。
+
+**当前代码处理**：manifest 里任何字符串值可写 `ask:VAR_NAME` 占位符（headers/env 里的
+值、甚至 url 子串）。占位符随片段存进 bundle（无 secret 值），`_merge_mcp.py` 在内网
+交互提示输入（名字含 TOKEN/SECRET/PASSWORD/KEY 的用隐藏输入）或 `--set VAR=值`
+非交互传入，写入 config 前才替换。
+
+**未来注意**：新增依赖内网信息的字段时，沿用 `ask:` 机制；**任何 secret 不落 bundle**。
+
+### E4. http 路线的 URL/tokenId 是内网 GUI 生成的，打包机填不了
+
+**现象**：NocoDB 内置 MCP 的 url 是 `http://<内网主机>/api/v2/mcp/<mcpTokenId>`，
+其中 `mcpTokenId` 是内网 GUI 创建 token 时才有的 id；联网机打包时这两段都是未知。
+
+**根因**：同 E3——server 地址和 token 标识都是内网侧信息。
+
+**当前代码处理**：模板/配方里把未知段写成 `ask:` 占位符或 `<占位>` 提示；
+`_merge_mcp.py` 同样支持在 url 子串里替换 `ask:`。另注意：该端点是**无状态
+streamable HTTP，只收 POST**，客户端 GET 探测收到 405 是正常的，不是配置错误。
+
+**未来注意**：分析新 MCP server 时，先分清"打包机可知"（npm 包名、公有 url）与
+"内网才知"（主机地址、token），后者一律 `ask:`。

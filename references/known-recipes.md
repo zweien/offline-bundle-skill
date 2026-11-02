@@ -156,6 +156,76 @@ NuGet 依赖 `DocumentFormat.OpenXml 3.5.1` + `System.CommandLine 2.0.5`。运�
 
 ---
 
+## NocoDB MCP（两条路线，二选一或并存）
+
+目标：让内网 zcode 通过 MCP 读写内网 NocoDB。**先调研再选路线**（2026-11 调研结论）：
+
+| | 路线 A：官方内置 | 路线 B：社区 stdio server |
+|---|---|---|
+| server | NocoDB 本体内置（≥0.265.0，2025-10 发布；账号级 token 需 2026.09.1+） | `nocodb-mcp`（zoyak-tech，v3 API，92 工具） |
+| 离线打包 | **零文件**，只生成配置片段 | npm 整树 ~几 MB（仅 2 个运行时依赖） |
+| 要求 | 内网 NocoDB 版本 ≥0.265.0（旧 fork 需同步上游） | NocoDB ≥2026.04（v3 API）+ API token |
+| 认证 | `x-api-key` header（GUI 创建 MCP token） | `NOCODB_API_TOKEN` env（GUI → Account → Tokens） |
+| 功能 | NocoDB 官方决定 | Community 自托管约 40-50/92 工具可用（见下） |
+| 客户端配置 | `type: http` + url + headers | `type: stdio` + node 入口 + env |
+
+**路线 A manifest**（`pack.py mcp` 的输入，零下载）：
+
+```json
+{
+  "servers": [
+    {
+      "name": "nocodb",
+      "transport": "http",
+      "url": "http://<内网nocodb主机>:8080/api/v2/mcp/ask:NOCODB_MCP_TOKEN_ID",
+      "headers": { "x-api-key": "ask:NOCODB_MCP_TOKEN" },
+      "note": "NocoDB >= 0.265.0; token + tokenId 均在内网 GUI 创建 (Base/Account settings -> MCP)"
+    }
+  ]
+}
+```
+
+**Notes（路线 A）:**
+- 端点 `POST /api/v2/mcp/<mcpTokenId>`，无状态 streamable HTTP，**GET 返回 405 是正常的**。
+- 认证 header 用 `x-api-key`（官方为"只能设一个自定义 header 的 MCP 客户端"特意兼容）。
+- 自有 fork 若停在 2026-07 之前（如 zweien/nocodb @2026-07-15），mcp 模块是 3 文件旧形态，
+  需先同步上游 ≥0.265.0（最好 2026.09.1+）才能用此路线——不想动 fork 就走路线 B。
+
+**路线 B manifest**（`pack.py mcp` 会 npm 整树下载 `nocodb-mcp`）：
+
+```json
+{
+  "servers": [
+    {
+      "name": "nocodb-mcp",
+      "transport": "stdio-npm",
+      "package": { "name": "nocodb-mcp" },
+      "env": {
+        "NOCODB_BASE_URL": "ask:NOCODB_BASE_URL",
+        "NOCODB_API_TOKEN": "ask:NOCODB_API_TOKEN"
+      },
+      "note": "zoyak-tech/nocodb-mcp, NocoDB v3 API (>= 2026.04); token: GUI -> Account -> Tokens"
+    }
+  ]
+}
+```
+
+**Notes（路线 B）:**
+- `nocodb-mcp` 是 ESM 包（`"type": "module"`）——正因如此走**独立子树**而非共享
+  wheelhouse/NODE_PATH（gotchas E1）。`pack.py mcp` 自动处理。
+- 双 bin：默认 `nocodb-mcp`（stdio）。想在**内网服务器上跑成共享 HTTP 服务**，给 server
+  加 `"bin": "nocodb-mcp-http"`，安装后 `set NOCODB_BASE_URL=... && node <入口>` 起服务
+  （PORT 默认 3000，`/health` 健康检查，`/mcp` 接客户端），各客户端改用 http 配置连它。
+- ⚠️ **NocoDB 社区版把 v3 Meta API 大部分锁在企业许可后**：Community 自托管可用的约
+  40-50/92 工具（连接/工作区/表/字段 CRUD/记录 CRUD+批量+全局搜索/导入导出/关联/附件）；
+  视图/webhook/仪表盘/工作流/脚本/NocoDocs/评论调用会返回 `ERR_LICENSE_REQUIRED`（402），
+  server 本身不受影响、其余工具照常。
+- 旧 NocoDB（v2 API）备选：`edwinbernadus/nocodb-mcp-server`（npm 同名包，记录 CRUD 为主，
+  `NOCODB_URL` + `NOCODB_API_TOKEN`）——功能窄但社区版无许可限制，package 段换成
+  `{"name": "nocodb-mcp-server"}`、env 键名对应改即可。
+
+---
+
 ## Adding a new skill
 
 1. Read `how-to-analyze.md` for the methodology.
